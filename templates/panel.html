@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Instagram Bot Yonetim Paneli</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
+    min-height: 100vh;
+    color: #e0e0ff;
+    padding: 16px;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 { text-align: center; color: #e1306c; font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { text-align: center; color: #888; font-size: 0.85rem; margin-bottom: 20px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tab {
+    padding: 10px 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.05); color: #aaa; cursor: pointer;
+    font-size: 0.9rem; font-weight: 600; transition: all 0.2s;
+  }
+  .tab:hover { background: rgba(255,255,255,0.1); }
+  .tab.active {
+    background: linear-gradient(135deg, #e1306c, #f77737);
+    color: #fff; border-color: transparent;
+  }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  .card {
+    background: rgba(255,255,255,0.05); border-radius: 16px;
+    padding: 16px; margin-bottom: 16px; border: 1px solid rgba(255,255,255,0.08);
+  }
+  .card-title {
+    font-size: 0.95rem; color: #ccc; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-label { font-size: 0.8rem; color: #888; }
+  .form-input, .form-select, .form-textarea {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 10px; padding: 10px 14px; color: #fff;
+    font-size: 0.9rem; outline: none; transition: border-color 0.2s;
+    font-family: inherit;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: #e1306c; }
+  .form-input::placeholder, .form-textarea::placeholder { color: #555; }
+  .form-select option { background: #1a1a2e; color: #fff; }
+  .form-textarea { min-height: 80px; resize: vertical; }
+  .btn-row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  .btn {
+    padding: 10px 22px; border-radius: 10px; border: none;
+    font-size: 0.85rem; font-weight: 600; cursor: pointer;
+    transition: all 0.2s; display: flex; align-items: center; gap: 6px;
+  }
+  .btn-primary { background: linear-gradient(135deg, #e1306c, #f77737); color: #fff; }
+  .btn-primary:hover { transform: scale(1.03); box-shadow: 0 4px 15px rgba(225,48,108,0.3); }
+  .btn-secondary { background: rgba(255,255,255,0.08); color: #ccc; border: 1px solid rgba(255,255,255,0.1); }
+  .btn-secondary:hover { background: rgba(255,255,255,0.12); }
+  .btn-success { background: rgba(0,210,106,0.15); color: #00d26a; border: 1px solid rgba(0,210,106,0.3); }
+  .btn-success:hover { background: rgba(0,210,106,0.25); }
+  .btn-warning { background: rgba(255,165,2,0.15); color: #ffa502; border: 1px solid rgba(255,165,2,0.3); }
+  .btn-warning:hover { background: rgba(255,165,2,0.25); }
+  .btn-danger { background: rgba(255,71,87,0.15); color: #ff4757; border: 1px solid rgba(255,71,87,0.3); }
+  .btn-danger:hover { background: rgba(255,71,87,0.25); }
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .stat-card {
+    background: rgba(255,255,255,0.05); border-radius: 14px;
+    padding: 14px; text-align: center; border: 1px solid rgba(255,255,255,0.08);
+  }
+  .stat-icon { font-size: 1.5rem; margin-bottom: 4px; }
+  .stat-value { font-size: 1.4rem; font-weight: 700; color: #fff; }
+  .stat-label { font-size: 0.7rem; color: #888; margin-top: 2px; }
+  .stat-success .stat-value { color: #00d26a; }
+  .stat-fail .stat-value { color: #ff4757; }
+  .stat-pending .stat-value { color: #ffa502; }
+  .stat-approved .stat-value { color: #00d26a; }
+  .stat-rejected .stat-value { color: #ff4757; }
+  .progress-section {
+    background: rgba(255,255,255,0.05); border-radius: 14px;
+    padding: 14px; margin-bottom: 16px;
+  }
+  .progress-header { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .progress-title { font-size: 0.85rem; color: #aaa; }
+  .progress-percent { font-size: 1rem; font-weight: 700; color: #e1306c; }
+  .progress-bar-bg { height: 8px; background: rgba(255,255,255,0.08); border-radius: 4px; overflow: hidden; }
+  .progress-bar-fill {
+    height: 100%; background: linear-gradient(90deg, #e1306c, #f77737);
+    border-radius: 4px; transition: width 0.5s ease; width: 0%;
+  }
+  .log-area {
+    height: 220px; overflow-y: auto; font-family: 'Courier New', monospace;
+    font-size: 0.75rem; line-height: 1.5; color: #aaa;
+    background: rgba(0,0,0,0.3); border-radius: 10px; padding: 10px;
+  }
+  .log-area::-webkit-scrollbar { width: 5px; }
+  .log-area::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 3px; }
+  .log-entry { padding: 1px 0; }
+  .log-time { color: #555; }
+  .log-success { color: #00d26a; }
+  .log-error { color: #ff4757; }
+  .log-info { color: #74b9ff; }
+  .followers-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 6px; max-height: 250px; overflow-y: auto;
+  }
+  .follower-item {
+    background: rgba(255,255,255,0.06); border-radius: 8px;
+    padding: 6px 10px; font-size: 0.78rem;
+    display: flex; align-items: center; gap: 6px;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .follower-item:hover { background: rgba(255,255,255,0.12); transform: translateX(3px); }
+  .follower-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .status-waiting { background: #ffa502; }
+  .status-processing { background: #74b9ff; animation: pulse 1s infinite; }
+  .status-done { background: #00d26a; }
+  .status-fail { background: #ff4757; }
+  .follower-name { color: #bbb; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .history-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px; max-height: 300px; overflow-y: auto;
+  }
+  .history-item {
+    background: rgba(255,255,255,0.06); border-radius: 10px;
+    padding: 10px 12px; font-size: 0.8rem; cursor: pointer;
+    transition: all 0.2s; border-left: 3px solid transparent;
+    text-decoration: none; color: inherit; display: block;
+  }
+  .history-item:hover { background: rgba(255,255,255,0.12); transform: translateY(-2px); }
+  .history-item.followed { border-left-color: #00d26a; }
+  .history-item.failed { border-left-color: #ff4757; }
+  .history-item.pending { border-left-color: #ffa502; }
+  .history-username { font-weight: 600; color: #fff; margin-bottom: 3px; }
+  .history-target { font-size: 0.7rem; color: #888; margin-bottom: 3px; }
+  .history-result {
+    font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; display: inline-block;
+  }
+  .history-result.success { background: rgba(0,210,106,0.15); color: #00d26a; }
+  .history-result.fail { background: rgba(255,71,87,0.15); color: #ff4757; }
+  .history-result.pending { background: rgba(255,165,2,0.15); color: #ffa502; }
+  .history-time { font-size: 0.65rem; color: #666; margin-top: 4px; }
+  .current-user {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 16px; background: rgba(255,255,255,0.05);
+    border-radius: 14px; margin-bottom: 16px;
+  }
+  .user-avatar {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: linear-gradient(135deg, #e1306c, #f77737);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem;
+  }
+  .user-info { flex: 1; }
+  .user-name { font-size: 0.95rem; font-weight: 600; color: #fff; }
+  .user-status { font-size: 0.78rem; color: #00d26a; display: flex; align-items: center; gap: 5px; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #00d26a; animation: pulse 1.5s infinite; }
+  .toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: rgba(30,30,50,0.95); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 12px; padding: 12px 18px; color: #fff;
+    font-size: 0.85rem; z-index: 1000;
+    transform: translateY(100px); opacity: 0;
+    transition: all 0.3s ease; backdrop-filter: blur(10px);
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast-success { border-left: 3px solid #00d26a; }
+  .toast-error { border-left: 3px solid #ff4757; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+  .account-card {
+    background: rgba(255,255,255,0.05); border-radius: 12px;
+    padding: 14px; border: 1px solid rgba(255,255,255,0.08);
+    display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+    transition: all 0.2s;
+  }
+  .account-card:hover { background: rgba(255,255,255,0.08); }
+  .account-avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: linear-gradient(135deg, #833ab4, #fd1d1d, #f77737);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem; flex-shrink: 0;
+  }
+  .account-info { flex: 1; }
+  .account-name { font-weight: 600; color: #fff; font-size: 0.9rem; }
+  .account-username { font-size: 0.75rem; color: #888; }
+  .account-status { font-size: 0.7rem; padding: 2px 8px; border-radius: 10px; display: inline-block; margin-top: 4px; }
+  .account-status.active { background: rgba(0,210,106,0.15); color: #00d26a; }
+  .account-status.inactive { background: rgba(255,165,2,0.15); color: #ffa502; }
+  .account-actions { display: flex; gap: 6px; }
+  .running-bots {
+    display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;
+  }
+  .running-bot-tag {
+    background: linear-gradient(135deg, #e1306c, #f77737);
+    color: #fff; padding: 6px 14px; border-radius: 20px;
+    font-size: 0.8rem; font-weight: 600; display: flex; align-items: center; gap: 6px;
+  }
+  .running-bot-tag .stop-btn {
+    background: rgba(255,255,255,0.2); border: none; color: #fff;
+    width: 20px; height: 20px; border-radius: 50%; cursor: pointer;
+    font-size: 0.7rem; display: flex; align-items: center; justify-content: center;
+  }
+  .daily-stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px;
+    margin-top: 12px;
+  }
+  .daily-stat-item {
+    background: rgba(255,255,255,0.03); border-radius: 8px; padding: 8px; text-align: center;
+    font-size: 0.75rem;
+  }
+  .daily-stat-date { color: #888; margin-bottom: 4px; }
+  .daily-stat-approved { color: #00d26a; font-weight: 600; }
+  .daily-stat-rejected { color: #ff4757; font-weight: 600; }
+  @media (max-width: 600px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .form-grid { grid-template-columns: 1fr; }
+    h1 { font-size: 1.3rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Instagram Bot Paneli</h1>
+  <p class="subtitle">Coklu Hesap | Topla & Takip Et | Surekli Dongu | Onay Sistemi</p>
+
+  <div class="tabs" id="tabs-container">
+    <div class="tab active" data-tab="tab1">Bot 1 - Topla</div>
+    <div class="tab" data-tab="tab2">Bot 2 - Topla</div>
+    <div class="tab" data-tab="tab3">Bot 3 - Topla</div>
+    <div class="tab" data-tab="tab4">Bot 4 - Takip Et</div>
+    <div class="tab" data-tab="tab5">Veritabani</div>
+    <div class="tab" data-tab="tab6">Hesaplar</div>
+  </div>
+
+  <!-- BOT 1 - TEK HEDEF SUREKLI DONGU -->
+  <div id="tab1" class="tab-content active">
+    <div class="card">
+      <div class="card-title">🔄 Bot 1 - Surekli Dongu (Tek Hedef)</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Hesap Sec</label>
+          <select class="form-select" id="b1-account"><option value="">Yukleniyor...</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hedef Hesap</label>
+          <input class="form-input" id="b1-target" value="evren_gayrimenkul_" placeholder="@hedef">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hedef Basina Max</label>
+          <input class="form-input" id="b1-max" type="number" value="50">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Dongu Araligi (sn)</label>
+          <input class="form-input" id="b1-delay" type="number" value="60">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-start-1">Baslat (Surekli)</button>
+        <button class="btn btn-success" id="btn-stop-1">Durdur</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOT 2 - COKLU HEDEF SUREKLI DONGU -->
+  <div id="tab2" class="tab-content">
+    <div class="card">
+      <div class="card-title">🔄 Bot 2 - Surekli Dongu (Coklu Hedef)</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Hesap Sec</label>
+          <select class="form-select" id="b2-account"><option value="">Yukleniyor...</option></select>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Hedef Hesaplar (Her satira bir hesap)</div>
+      <textarea class="form-textarea" id="b2-targets">evren_gayrimenkul_
+nusaybingunduzemlak</textarea>
+      <div class="form-grid" style="margin-top:12px;">
+        <div class="form-group">
+          <label class="form-label">Hedef Basina Max</label>
+          <input class="form-input" id="b2-per-target" type="number" value="50">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Dongu Araligi (sn)</label>
+          <input class="form-input" id="b2-delay" type="number" value="60">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-start-2">Baslat (Surekli)</button>
+        <button class="btn btn-success" id="btn-stop-2">Durdur</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOT 3 - TEK HESAP SUREKLI DONGU -->
+  <div id="tab3" class="tab-content">
+    <div class="card">
+      <div class="card-title">🔄 Bot 3 - Surekli Dongu (Tek Hesap)</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Hesap Sec</label>
+          <select class="form-select" id="b3-account"><option value="">Yukleniyor...</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hedef Hesap</label>
+          <input class="form-input" id="b3-target" value="nusaybin_gerceklerii" placeholder="@hedef">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hedef Basina Max</label>
+          <input class="form-input" id="b3-max" type="number" value="50">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Dongu Araligi (sn)</label>
+          <input class="form-input" id="b3-delay" type="number" value="60">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-start-3">Baslat (Surekli)</button>
+        <button class="btn btn-success" id="btn-stop-3">Durdur</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOT 4 - TAKIP ETME -->
+  <div id="tab4" class="tab-content">
+    <div class="card">
+      <div class="card-title">✅ Bot 4 - Takip Etme (Onay Sistemi)</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Hesap Sec</label>
+          <select class="form-select" id="b4-account"><option value="">Yukleniyor...</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Batch Boyutu</label>
+          <input class="form-input" id="b4-batch" type="number" value="50">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Bekleme (sn)</label>
+          <input class="form-input" id="b4-delay" type="number" value="5">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mola Araligi</label>
+          <input class="form-input" id="b4-break" type="number" value="400">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mola Suresi (sn)</label>
+          <input class="form-input" id="b4-break-duration" type="number" value="100">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-start-4">Baslat (Surekli)</button>
+        <button class="btn btn-success" id="btn-stop-4">Durdur</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">ℹ️ Onay Sistemi</div>
+      <p style="font-size:0.85rem;color:#aaa;line-height:1.6;">
+        ✅ <b>Onayli (Approved):</b> Basariyla takip edilen kullanicilar<br>
+        ❌ <b>Onaysiz (Rejected):</b> Takip edilemeyen kullanicilar (buton bulunamadi, hesap gizli, vb.)<br>
+        🔄 <b>Surekli Dongu:</b> Veritabaninda kullanici kalmayana kadar devam eder, sonra yeni kullanici bekler
+      </p>
+    </div>
+  </div>
+
+  <!-- VERITABANI -->
+  <div id="tab5" class="tab-content">
+    <div class="two-col">
+      <div class="card">
+        <div class="card-title">Veritabani Istatistikleri</div>
+        <div class="form-group" style="margin-bottom:12px;">
+          <label class="form-label">Hesap Sec</label>
+          <select class="form-select" id="db-account"><option value="">Yukleniyor...</option></select>
+        </div>
+        <div class="stats-grid" style="margin-bottom:0;">
+          <div class="stat-card stat-pending">
+            <div class="stat-icon">B</div>
+            <div class="stat-value" id="db-pending">0</div>
+            <div class="stat-label">Bekleyen</div>
+          </div>
+          <div class="stat-card stat-success">
+            <div class="stat-icon">T</div>
+            <div class="stat-value" id="db-followed">0</div>
+            <div class="stat-label">Takip Edildi</div>
+          </div>
+          <div class="stat-card stat-fail">
+            <div class="stat-icon">X</div>
+            <div class="stat-value" id="db-failed">0</div>
+            <div class="stat-label">Basarisiz</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon">#</div>
+            <div class="stat-value" id="db-total">0</div>
+            <div class="stat-label">Toplam</div>
+          </div>
+          <div class="stat-card stat-approved">
+            <div class="stat-icon">✅</div>
+            <div class="stat-value" id="db-approved">0</div>
+            <div class="stat-label">Onayli</div>
+          </div>
+          <div class="stat-card stat-rejected">
+            <div class="stat-icon">❌</div>
+            <div class="stat-value" id="db-rejected">0</div>
+            <div class="stat-label">Onaysiz</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">Veritabani Islemleri</div>
+        <div class="btn-row">
+          <button class="btn btn-warning" id="btn-reset-failed">Basarisizlari Tekrar Dene</button>
+          <button class="btn btn-secondary" id="btn-clear-history">Gecmisi Temizle</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Son 25 Takip Islemi</div>
+      <div class="history-grid" id="history-grid">
+        <div style="color:#888;font-size:0.85rem;padding:20px;text-align:center;">Henuez takip islemi yok...</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Gunluk Istatistikler (Son 7 Gun)</div>
+      <div class="daily-stats" id="daily-stats">
+        <div style="color:#888;font-size:0.85rem;padding:10px;text-align:center;grid-column:1/-1;">Yukleniyor...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- HESAPLAR -->
+  <div id="tab6" class="tab-content">
+    <div class="card">
+      <div class="card-title">Yeni Hesap Ekle</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Hesap Adi (Takma Ad)</label>
+          <input class="form-input" id="acc-name" placeholder="Orn: Ana Hesap">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Kullanici Adi</label>
+          <input class="form-input" id="acc-username" placeholder="@kullaniciadi">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Sifre</label>
+          <input class="form-input" id="acc-password" type="password" placeholder="sifre">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-add-account">Hesap Ekle</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Kayitli Hesaplar</div>
+      <div id="accounts-list"></div>
+    </div>
+  </div>
+
+  <div class="running-bots" id="running-bots"></div>
+
+  <div class="stats-grid">
+    <div class="stat-card stat-success">
+      <div class="stat-icon">✅</div>
+      <div class="stat-value" id="stat-approved">0</div>
+      <div class="stat-label">Onayli</div>
+    </div>
+    <div class="stat-card stat-fail">
+      <div class="stat-icon">❌</div>
+      <div class="stat-value" id="stat-rejected">0</div>
+      <div class="stat-label">Onaysiz</div>
+    </div>
+    <div class="stat-card stat-pending">
+      <div class="stat-icon">BEK</div>
+      <div class="stat-value" id="stat-pending">0</div>
+      <div class="stat-label">Bekleyen</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon">#</div>
+      <div class="stat-value" id="stat-total">0</div>
+      <div class="stat-label">Toplam</div>
+    </div>
+  </div>
+
+  <div class="progress-section">
+    <div class="progress-header">
+      <span class="progress-title">Ilerleme</span>
+      <span class="progress-percent" id="progress-percent">0%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progress-bar"></div>
+    </div>
+  </div>
+
+  <div class="current-user">
+    <div class="user-avatar">U</div>
+    <div class="user-info">
+      <div class="user-name" id="current-user">@hesap secilmedi</div>
+      <div class="user-status">
+        <span class="status-dot"></span>
+        <span id="bot-status">Bekliyor</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Canli Log</div>
+    <div class="log-area" id="log-area">
+      <div class="log-entry"><span class="log-time">[--:--:--]</span> Panel hazir. Bot baslatmayi bekliyor...</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Toplanan / Islenen Kullanicilar</div>
+    <div class="followers-grid" id="followers-grid"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="/static/panel.js"></script>
+</body>
+</html>
