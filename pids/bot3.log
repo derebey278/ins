@@ -2,3 +2,13 @@
 2026-07-20 00:04:52,989 - INFO - ChromeDriver bulundu: /data/data/com.termux/files/usr/bin/chromedriver
 2026-07-20 00:04:54,806 - INFO - Driver baslatildi (Termux/Android)
 2026-07-20 00:04:54,807 - INFO - Instagram login sayfasi yukleniyor...
+2026-07-20 11:37:06,327 - INFO - Chrome profili: chrome_profiles/bot_3
+2026-07-20 11:37:06,329 - INFO - Chromium bulundu: /data/data/com.termux/files/usr/bin/chromium-browser
+2026-07-20 11:37:06,331 - INFO - ChromeDriver bulundu: /data/data/com.termux/files/usr/bin/chromedriver
+2026-07-20 11:37:07,153 - ERROR - Service ile baslatilamadi: Message: session not created: Chrome instance exited. Examine ChromeDriver verbose log to determine the cause.; For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#sessionnotcreatedexception
+
+2026-07-20 11:37:07,154 - INFO - Profilsiz deneniyor...
+2026-07-20 11:37:07,155 - ERROR - Profilsiz de baslatilamadi: Message: Unable to obtain driver for chrome; For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors/driver_location
+
+2026-07-20 11:37:07,155 - ERROR - Beklenmeyen hata: Message: Unable to obtain driver for chrome; For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors/driver_location
+

@@ -15,7 +15,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import (
     TimeoutException, NoSuchElementException,
-    ElementClickInterceptedException, StaleElementReferenceException
+    ElementClickInterceptedException, StaleElementReferenceException,
+    WebDriverException
 )
 
 from config import DB_PATH, CHROMIUM_PATHS, CHROMEDRIVER_PATHS
@@ -32,11 +33,11 @@ class InstagramBot:
         self.account_id = account_id
         self.driver = None
         self.wait = None
-        self.running = True  # Durdurma kontrolü
+        self.wait_short = None
+        self.running = True
+        self.consecutive_errors = 0
 
-    # ============ DRIVER SETUP ============
-
-    def setup_driver(self):
+    def setup_driver(self, profile_dir=None):
         options = webdriver.ChromeOptions()
         options.add_argument("--headless")
         options.add_argument("--no-sandbox")
@@ -61,6 +62,26 @@ class InstagramBot:
             "--user-agent=Mozilla/5.0 (Linux; Android 14; SM-S918B) "
             "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
         )
+        # ===== Bellek optimizasyonu =====
+        options.add_argument("--js-flags=--max-old-space-size=512")
+        options.add_argument("--memory-model=low")
+        options.add_argument("--max_discard_memory_in_percentage=10")
+
+        profile_used = False
+        if profile_dir:
+            try:
+                lock_file = os.path.join(profile_dir, 'SingletonLock')
+                if os.path.exists(lock_file):
+                    try:
+                        os.remove(lock_file)
+                    except:
+                        pass
+
+                options.add_argument(f"--user-data-dir={profile_dir}")
+                logger.info(f"Chrome profili: {profile_dir}")
+                profile_used = True
+            except Exception as e:
+                logger.warning(f"Profil ayarlanamadi: {e}, profilsiz devam ediliyor...")
 
         chromium_found = False
         for path in CHROMIUM_PATHS:
@@ -88,9 +109,32 @@ class InstagramBot:
             self.driver = webdriver.Chrome(service=service, options=options)
         except Exception as e:
             logger.error(f"Service ile baslatilamadi: {e}")
-            self.driver = webdriver.Chrome(options=options)
+            if profile_used:
+                logger.info("Profilsiz deneniyor...")
+                options = webdriver.ChromeOptions()
+                options.add_argument("--headless")
+                options.add_argument("--no-sandbox")
+                options.add_argument("--disable-dev-shm-usage")
+                options.add_argument("--disable-gpu")
+                options.add_argument("--window-size=1920,1080")
+                options.add_argument("--disable-blink-features=AutomationControlled")
+                options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                options.add_argument(
+                    "--user-agent=Mozilla/5.0 (Linux; Android 14; SM-S918B) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+                )
+                for path in CHROMIUM_PATHS:
+                    if os.path.exists(path):
+                        options.binary_location = path
+                        break
+            try:
+                self.driver = webdriver.Chrome(options=options)
+            except Exception as e2:
+                logger.error(f"Profilsiz de baslatilamadi: {e2}")
+                raise
 
         self.wait = WebDriverWait(self.driver, 30)
+        self.wait_short = WebDriverWait(self.driver, 10)
         self._anti_detection()
         logger.info("Driver baslatildi (Termux/Android)")
 
@@ -102,7 +146,10 @@ class InstagramBot:
             "Object.defineProperty(navigator, 'platform', {get: () => 'Linux armv8l'})",
         ]
         for script in scripts:
-            self.driver.execute_script(script)
+            try:
+                self.driver.execute_script(script)
+            except:
+                pass
 
     def _install_chromedriver(self):
         try:
@@ -119,11 +166,30 @@ class InstagramBot:
             logger.error(f"Otomatik kurulum basarisiz: {e}")
 
     def stop(self):
-        """Bot'u durdur"""
         self.running = False
         logger.info("Bot durdurma sinyali alindi...")
 
-    # ============ POPUP DISMISS ============
+    def _check_driver_alive(self):
+        """Driver hala calisiyor mu kontrol et"""
+        try:
+            self.driver.title
+            return True
+        except:
+            return False
+
+    def _restart_driver(self, profile_dir=None):
+        """Driver'i yeniden baslat"""
+        logger.warning("Driver yeniden baslatiliyor...")
+        try:
+            self.close()
+        except:
+            pass
+        time.sleep(3)
+        self.setup_driver(profile_dir)
+        if self.login():
+            logger.info("Driver yeniden baslatildi ve giris yapildi")
+            return True
+        return False
 
     def _dismiss_save_login_popup(self):
         logger.info("'Save login info' popup kontrolu...")
@@ -158,8 +224,6 @@ class InstagramBot:
                 time.sleep(2)
             except:
                 pass
-
-    # ============ LOGIN ============
 
     def login(self):
         try:
@@ -287,7 +351,6 @@ class InstagramBot:
     # ============ DATABASE HELPERS ============
 
     def _db_add_follower(self, username, source_account, bot_id):
-        """Kullanıcı adı bir kez eklensin, tekrar eklenmesin"""
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         try:
@@ -295,7 +358,7 @@ class InstagramBot:
             existing = c.fetchone()
             if existing:
                 conn.close()
-                return False  # Zaten var
+                return False
 
             c.execute(
                 "INSERT INTO followers (username, source_account, bot_id, account_id, status, approval, created_at) "
@@ -323,7 +386,6 @@ class InstagramBot:
         conn.close()
 
     def _db_update_approval(self, username, approval):
-        """Onay durumu: approved / rejected"""
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute(
@@ -344,33 +406,21 @@ class InstagramBot:
         conn.commit()
         conn.close()
 
-    def _db_get_pending(self, bot_id, limit=50):
+    def _db_get_pending_for_follow(self, batch_size=50):
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute(
-            "SELECT username, source_account FROM followers WHERE bot_id = ? AND account_id = ? "
-            "AND status = 'pending' ORDER BY created_at ASC LIMIT ?",
-            (bot_id, self.account_id, limit)
-        )
-        rows = c.fetchall()
-        conn.close()
-        return rows
-
-    def _db_get_pending_for_follow(self, limit=50):
-        """Takip edilecek bekleyen kullanıcılar"""
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute(
-            "SELECT username, source_account FROM followers WHERE account_id = ? "
-            "AND status = 'pending' AND approval = 'pending' ORDER BY created_at ASC LIMIT ?",
-            (self.account_id, limit)
-        )
+        c.execute("""
+            SELECT f.username, f.source_account FROM followers f
+            LEFT JOIN failed_retry_control fr ON f.username = fr.username AND f.account_id = fr.account_id
+            WHERE f.account_id = ? AND f.status = 'pending' AND f.approval = 'pending'
+            AND (fr.can_retry = 1 OR fr.can_retry IS NULL)
+            ORDER BY f.created_at ASC LIMIT ?
+        """, (self.account_id, batch_size))
         rows = c.fetchall()
         conn.close()
         return rows
 
     def _db_increment_daily_stat(self, stat_type):
-        """Günlük istatistiği artır"""
         today = datetime.now().strftime('%Y-%m-%d')
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -382,252 +432,157 @@ class InstagramBot:
             if stat_type == 'approved':
                 c.execute("UPDATE daily_stats SET approved_count = approved_count + 1 WHERE account_id = ? AND date = ?",
                           (self.account_id, today))
-            else:
+            elif stat_type == 'rejected':
                 c.execute("UPDATE daily_stats SET rejected_count = rejected_count + 1 WHERE account_id = ? AND date = ?",
                           (self.account_id, today))
         else:
             if stat_type == 'approved':
                 c.execute("INSERT INTO daily_stats (account_id, date, approved_count, rejected_count) VALUES (?, ?, 1, 0)",
                           (self.account_id, today))
-            else:
+            elif stat_type == 'rejected':
                 c.execute("INSERT INTO daily_stats (account_id, date, approved_count, rejected_count) VALUES (?, ?, 0, 1)",
                           (self.account_id, today))
 
         conn.commit()
         conn.close()
 
+    def _db_record_failure(self, username):
+        from database import db_record_failure
+        db_record_failure(username, self.account_id)
+
     # ============ GET FOLLOWERS ============
 
-    def get_followers(self, target_username, max_followers=1, bot_id=1, source_account=""):
-        followers = []
+    def get_followers(self, target_username, max_followers=50, bot_id=1, source_account=""):
         try:
-            logger.info(f"{target_username} profiline gidiliyor (takipciler icin)...")
+            logger.info(f"@{target_username} profiline gidiliyor...")
             self.driver.get(f"https://www.instagram.com/{target_username}/")
-            time.sleep(random.uniform(10, 15))
-
-            followers_btn = self._find_followers_button()
-            if not followers_btn:
-                logger.error("Takipciler butonu bulunamadi!")
-                return followers
-
-            self._click_followers_button(followers_btn)
             time.sleep(random.uniform(8, 12))
 
-            current_url = self.driver.current_url
-            logger.info(f"Takipciler tiklandiktan sonra URL: {current_url}")
+            try:
+                self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "header")))
+            except:
+                logger.warning("Header bulunamadi, devam ediliyor...")
 
-            if "/followers/" in current_url:
-                logger.info("Takipciler sayfasi yuklendi (URL yonlendirmesi)")
-                return self._extract_followers_from_page(
-                    target_username, max_followers, bot_id, source_account or target_username
+            followers_link = self._find_followers_link()
+            if not followers_link:
+                logger.error(f"@{target_username} icin takipciler linki bulunamadi")
+                return 0
+
+            followers_link.click()
+            logger.info("Takipciler popup'i acildi")
+            time.sleep(random.uniform(5, 8))
+
+            collected = 0
+            last_height = 0
+            same_height_count = 0
+            scroll_attempts = 0
+            max_scroll_attempts = max_followers // 5 + 10
+
+            while collected < max_followers and scroll_attempts < max_scroll_attempts and self.running:
+                scroll_attempts += 1
+                users = self._extract_usernames_from_dialog()
+
+                for user in users:
+                    if not self.running:
+                        break
+                    if collected >= max_followers:
+                        break
+                    if self._db_add_follower(user, source_account or target_username, bot_id):
+                        collected += 1
+                        if collected % 10 == 0:
+                            logger.info(f"Toplandi: {collected}/{max_followers}")
+
+                self.driver.execute_script(
+                    'var d = document.querySelector("div[role=\'dialog\'] div._aano, '
+                    'div[role=\'dialog\'] ._aano, div[role=\'dialog\'] > div > div"); '
+                    'if(d) d.scrollTop = d.scrollHeight;'
+                )
+                time.sleep(random.uniform(2, 4))
+
+                new_height = self.driver.execute_script(
+                    'var d = document.querySelector("div[role=\'dialog\'] div._aano, '
+                    'div[role=\'dialog\'] ._aano, div[role=\'dialog\'] > div > div"); '
+                    'return d ? d.scrollTop : 0;'
                 )
 
-            return self._extract_followers_from_dialog(
-                target_username, max_followers, bot_id, source_account or target_username
-            )
+                if new_height == last_height:
+                    same_height_count += 1
+                    if same_height_count >= 3:
+                        logger.info("Scroll sonuna gelindi")
+                        break
+                else:
+                    same_height_count = 0
+                last_height = new_height
+
+            logger.info(f"@{target_username} icin {collected} kullanici toplandi")
+            return collected
 
         except Exception as e:
-            logger.error(f"Takipcileri alma hatasi: {e}")
-            return followers
+            logger.error(f"Takipci toplama hatasi ({target_username}): {e}")
+            return 0
 
-    def _find_followers_button(self):
+    def _find_followers_link(self):
         selectors = [
             '//a[contains(@href, "/followers/")]',
-            '//*[contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "followers") '
-            'or contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "takipci")]',
+            '//span[contains(text(), "takipci") or contains(text(), "followers")]/parent::a',
+            '//*[contains(text(), "takipci") or contains(text(), "followers")]',
         ]
         for xpath in selectors:
             try:
-                btn = self.driver.find_element(By.XPATH, xpath)
-                logger.info(f"Takipciler butonu bulundu: {xpath}")
-                return btn
+                elem = self.driver.find_element(By.XPATH, xpath)
+                if elem.tag_name == 'a':
+                    return elem
+                parent = elem.find_element(By.XPATH, '..')
+                if parent.tag_name == 'a':
+                    return parent
+                return elem
             except:
                 pass
 
         try:
-            stats = self.driver.find_elements(By.XPATH, '//header//li | //header//span[contains(@class, "_ac2a")]')
-            for stat in stats:
-                text = stat.text.lower()
-                if "follower" in text or "takipci" in text:
-                    logger.info(f"Takipciler butonu bulundu (stat): text='{stat.text}'")
-                    return stat
+            all_links = self.driver.find_elements(By.TAG_NAME, "a")
+            for link in all_links:
+                href = link.get_attribute("href") or ""
+                if "/followers" in href:
+                    return link
         except:
             pass
         return None
 
-    def _click_followers_button(self, btn):
+    def _extract_usernames_from_dialog(self):
+        usernames = set()
         try:
-            btn.click()
-            logger.info("Takipciler butonuna tiklandi")
-        except:
-            try:
-                self.driver.execute_script("arguments[0].click();", btn)
-                logger.info("Takipciler butonuna JS ile tiklandi")
-            except Exception as e:
-                logger.error(f"Takipciler butonuna tiklanamadi: {e}")
-                raise
-
-    def _extract_followers_from_dialog(self, target_username, max_followers, bot_id, source_account):
-        followers = []
-        scroll_count = 0
-        max_scrolls = 500
-
-        dialogs = self.driver.find_elements(By.XPATH, '//div[@role="dialog"]')
-        if not dialogs:
-            logger.warning("Dialog bulunamadi!")
-            return followers
-
-        while len(followers) < max_followers and scroll_count < max_scrolls and self.running:
-            for dialog in dialogs:
-                try:
-                    links = dialog.find_elements(By.TAG_NAME, "a")
-                    for link in links:
-                        try:
-                            username = self._extract_username_from_link(link, target_username)
-                            if username and username not in followers:
-                                if self._db_add_follower(username, source_account, bot_id):
-                                    followers.append(username)
-                                    logger.info(f"✅ YENI: {username} (Kaynak: {source_account})")
-                                else:
-                                    logger.info(f"⏭️ ATLA: {username} (Zaten DB'de)")
-                                if len(followers) >= max_followers:
-                                    break
-                        except:
-                            continue
-                except:
-                    continue
-
-            if len(followers) < max_followers and self.running:
-                for dialog in dialogs:
-                    try:
-                        spans = dialog.find_elements(By.XPATH, './/span[@dir="auto"]')
-                        for span in spans:
-                            try:
-                                username = self._extract_username_from_span(span, target_username)
-                                if username and username not in followers:
-                                    if self._db_add_follower(username, source_account, bot_id):
-                                        followers.append(username)
-                                        logger.info(f"✅ YENI (span): {username}")
-                                    else:
-                                        logger.info(f"⏭️ ATLA (span): {username} (Zaten DB'de)")
-                                    if len(followers) >= max_followers:
-                                        break
-                            except:
-                                continue
-                    except:
-                        continue
-
-            try:
-                for dialog in dialogs:
-                    try:
-                        scrollable = dialog.find_element(
-                            By.XPATH,
-                            './/div[contains(@class, "_aano") or contains(@class, "x1gryazu") or contains(@class, "x78zum5")]'
-                        )
-                        self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", scrollable)
-                        logger.info(f"Scroll ({scroll_count + 1}/{max_scrolls})")
-                        break
-                    except:
-                        continue
-            except:
-                pass
-
-            time.sleep(random.uniform(3, 5))
-            scroll_count += 1
-            dialogs = self.driver.find_elements(By.XPATH, '//div[@role="dialog"]')
-
-        try:
-            self.driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
-            logger.info("Modal kapatildi")
-            time.sleep(2)
+            dialog = self.driver.find_element(
+                By.XPATH,
+                '//div[@role="dialog"]//div[contains(@class, "_aano") or contains(@class, "xyi19xy")]'
+            )
+            links = dialog.find_elements(By.TAG_NAME, "a")
+            for link in links:
+                href = link.get_attribute("href") or ""
+                if "/" in href and "/p/" not in href and "/reel/" not in href:
+                    username = href.rstrip("/").split("/")[-1]
+                    if username and len(username) > 1 and username not in ["explore", "accounts", "direct"]:
+                        usernames.add(username)
         except:
             pass
 
-        followers = list(dict.fromkeys(followers))
-        logger.info(f"Toplam {len(followers)} yeni takipci bulundu ve kaydedildi")
-        return followers[:max_followers]
-
-    def _extract_followers_from_page(self, target_username, max_followers, bot_id, source_account):
-        followers = []
-        scroll_count = 0
-        max_scrolls = 500
-
-        while len(followers) < max_followers and scroll_count < max_scrolls and self.running:
+        if not usernames:
             try:
-                links = self.driver.find_elements(By.TAG_NAME, "a")
-                for link in links:
-                    try:
-                        username = self._extract_username_from_link(link, target_username)
-                        if username and username not in followers:
-                            if self._db_add_follower(username, source_account, bot_id):
-                                followers.append(username)
-                                logger.info(f"✅ YENI (page): {username}")
-                            else:
-                                logger.info(f"⏭️ ATLA (page): {username} (Zaten DB'de)")
-                            if len(followers) >= max_followers:
-                                break
-                    except:
-                        continue
+                spans = self.driver.find_elements(
+                    By.XPATH,
+                    '//div[@role="dialog"]//span[contains(@class, "_ap3a")]'
+                )
+                for span in spans:
+                    text = span.text.strip()
+                    if text and " " not in text and len(text) > 1:
+                        usernames.add(text)
             except:
                 pass
+        return list(usernames)
 
-            if len(followers) < max_followers and self.running:
-                try:
-                    spans = self.driver.find_elements(By.XPATH, '//span[@dir="auto"]')
-                    for span in spans:
-                        try:
-                            username = self._extract_username_from_span(span, target_username)
-                            if username and username not in followers:
-                                if self._db_add_follower(username, source_account, bot_id):
-                                    followers.append(username)
-                                    logger.info(f"✅ YENI (page span): {username}")
-                                else:
-                                    logger.info(f"⏭️ ATLA (page span): {username} (Zaten DB'de)")
-                                if len(followers) >= max_followers:
-                                    break
-                        except:
-                            continue
-                except:
-                    pass
-
-            try:
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                logger.info(f"Page scroll ({scroll_count + 1}/{max_scrolls})")
-            except:
-                pass
-
-            time.sleep(random.uniform(3, 5))
-            scroll_count += 1
-
-        followers = list(dict.fromkeys(followers))
-        logger.info(f"Toplam {len(followers)} yeni takipci bulundu (sayfa)")
-        return followers[:max_followers]
-
-    def _extract_username_from_link(self, link_element, target_username):
-        href = link_element.get_attribute("href") or ""
-        if "/" in href:
-            parts = [p for p in href.split("/") if p and p not in
-                     ['https:', 'http:', 'www.instagram.com', 'instagram.com']]
-            if parts:
-                username = parts[-1]
-                if (username and username != target_username and
-                    username not in ['p', 'explore', 'accounts', 'direct', 'reels', 'about', 'blog'] and
-                    len(username) > 1 and not username.startswith('#')):
-                    return username
-        return None
-
-    def _extract_username_from_span(self, span_element, target_username):
-        text = span_element.text.strip()
-        if (text and " " not in text and text != target_username and
-            len(text) > 2 and len(text) < 31 and
-            (text.isalnum() or "_" in text or "." in text) and text[0].isalnum()):
-            return text
-        return None
-
-    # ============ SÜREKLİ DÖNGÜ - TAKİPÇİ TOPLAMA ============
+    # ============ COLLECT FOLLOWERS LOOP ============
 
     def collect_followers_loop(self, targets, max_per_target=50, bot_id=1, loop_delay=60):
-        """Sürekli döngüde takipçi topla - durdurana kadar devam et"""
         logger.info(f"\n{'='*60}")
         logger.info("SUREKLI DONGU MODU BASLADI")
         logger.info(f"Hedefler: {targets}")
@@ -666,7 +621,6 @@ class InstagramBot:
                 logger.info(f"\n>>> DONGU #{cycle} TAMAMLANDI. {loop_delay}s sonra tekrar baslayacak...")
                 logger.info(f"{'='*60}\n")
 
-                # loop_delay saniye boyunca her 1 saniye kontrol et (durdurma için)
                 for _ in range(loop_delay):
                     if not self.running:
                         break
@@ -674,60 +628,79 @@ class InstagramBot:
 
         logger.info("\n>>> SUREKLI DONGU DURDURULDU <<<\n")
 
-    # ============ FOLLOW USER (ONAY SİSTEMİ) ============
+    # ============ FOLLOW USER - GELISTIRILMIS BUTON BULMA ============
 
     def follow_user(self, target_username, source_account="", bot_id=4):
-        """Kullanıcıyı takip et - onaylı/onaysız olarak kaydet"""
         try:
             logger.info(f"{target_username} profiline gidiliyor...")
             self.driver.get(f"https://www.instagram.com/{target_username}/")
             time.sleep(random.uniform(10, 15))
 
+            # ===== SAYFA YUKLENMESINI BEKLE =====
             try:
                 self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "header")))
             except:
                 logger.warning("Header bulunamadi, devam ediliyor...")
 
-            # Zaten takip ediliyor mu kontrol et
+            # Ekstra bekleme - sayfanin tam yuklenmesi icin
+            time.sleep(random.uniform(3, 5))
+
+            # ===== ZATEN TAKIP EDILIYOR MU KONTROL ET =====
             already_following = self._check_already_following(target_username)
             if already_following:
                 self._db_update_status(target_username, 'followed')
-                self._db_update_approval(target_username, 'approved')  # ✅ ONAYLI
+                self._db_update_approval(target_username, 'approved')
                 self._db_add_history(target_username, source_account, bot_id, 'followed', 'already_following')
                 self._db_increment_daily_stat('approved')
-                logger.info(f"✅ ONAYLI: {target_username} (Zaten takip ediliyor)")
+                logger.info(f"ONAYLI: {target_username} (Zaten takip ediliyor)")
+                self.consecutive_errors = 0
                 return "already_following"
 
-            # Takip butonunu bul ve tıkla
+            # ===== TAKIP BUTONUNU BUL =====
             follow_button = self._find_follow_button()
 
             if not follow_button:
                 logger.info("Takip butonu bulunamadi, JavaScript deneniyor...")
                 if self._js_follow_click(target_username, source_account, bot_id):
+                    self.consecutive_errors = 0
                     return True
                 else:
+                    # ===== HESAP GIZLI MI KONTROL ET =====
+                    is_private = self._check_private_account()
+                    if is_private:
+                        self._db_update_status(target_username, 'failed')
+                        self._db_update_approval(target_username, 'rejected')
+                        self._db_add_history(target_username, source_account, bot_id, 'failed', 'private_account')
+                        self._db_increment_daily_stat('rejected')
+                        self._db_record_failure(target_username)
+                        logger.info(f"ONAYSIZ: {target_username} (Gizli hesap)")
+                        self.consecutive_errors += 1
+                        return False
+
                     self._db_update_status(target_username, 'failed')
-                    self._db_update_approval(target_username, 'rejected')  # ❌ ONAYSIZ
+                    self._db_update_approval(target_username, 'rejected')
                     self._db_add_history(target_username, source_account, bot_id, 'failed', 'button_not_found')
                     self._db_increment_daily_stat('rejected')
-                    logger.info(f"❌ ONAYSIZ: {target_username} (Buton bulunamadi)")
+                    self._db_record_failure(target_username)
+                    logger.info(f"ONAYSIZ: {target_username} (Buton bulunamadi)")
+                    self.consecutive_errors += 1
                     return False
 
             if follow_button:
                 try:
                     follow_button.click()
-                    logger.info(f"✅ {target_username} takip edildi!")
+                    logger.info(f"{target_username} takip edildi!")
                 except ElementClickInterceptedException:
                     logger.warning("Normal tiklama engellendi, JS ile tiklaniyor...")
                     self.driver.execute_script("arguments[0].click();", follow_button)
-                    logger.info(f"✅ {target_username} takip edildi (JS fallback)!")
+                    logger.info(f"{target_username} takip edildi (JS fallback)!")
 
-                # BAŞARILI - ONAYLI ✅
                 self._db_update_status(target_username, 'followed')
                 self._db_update_approval(target_username, 'approved')
                 self._db_add_history(target_username, source_account, bot_id, 'followed', 'success')
                 self._db_increment_daily_stat('approved')
-                logger.info(f"✅ ONAYLI: {target_username} (Basariyla takip edildi)")
+                logger.info(f"ONAYLI: {target_username} (Basariyla takip edildi)")
+                self.consecutive_errors = 0
                 time.sleep(random.uniform(4, 7))
                 return True
 
@@ -735,16 +708,28 @@ class InstagramBot:
             self._db_update_approval(target_username, 'rejected')
             self._db_add_history(target_username, source_account, bot_id, 'failed', 'unknown')
             self._db_increment_daily_stat('rejected')
-            logger.info(f"❌ ONAYSIZ: {target_username} (Bilinmeyen hata)")
+            self._db_record_failure(target_username)
+            logger.info(f"ONAYSIZ: {target_username} (Bilinmeyen hata)")
+            self.consecutive_errors += 1
             return False
 
+        except WebDriverException as e:
+            logger.error(f"WebDriver hatasi ({target_username}): {e}")
+            self.consecutive_errors += 1
+            # Driver olmus olabilir, yeniden baslatmayi dene
+            if not self._check_driver_alive():
+                logger.warning("Driver olmus gorunuyor, yeniden baslatiliyor...")
+                return "restart_needed"
+            return False
         except Exception as e:
-            logger.error(f"❌ {target_username} takip hatasi: {e}")
+            logger.error(f"{target_username} takip hatasi: {e}")
             self._db_update_status(target_username, 'failed')
             self._db_update_approval(target_username, 'rejected')
             self._db_add_history(target_username, source_account, bot_id, 'failed', 'exception')
             self._db_increment_daily_stat('rejected')
-            logger.info(f"❌ ONAYSIZ: {target_username} (Hata: {e})")
+            self._db_record_failure(target_username)
+            logger.info(f"ONAYSIZ: {target_username} (Hata: {e})")
+            self.consecutive_errors += 1
             return False
 
     def _check_already_following(self, target_username):
@@ -759,13 +744,34 @@ class InstagramBot:
         for xpath in check_selectors:
             try:
                 btn = self.driver.find_element(By.XPATH, xpath)
-                logger.info(f"ℹ️ {target_username} zaten takip ediliyor! (Buton: '{btn.text}')")
+                logger.info(f"{target_username} zaten takip ediliyor! (Buton: '{btn.text}')")
                 return True
             except:
                 pass
         return False
 
+    def _check_private_account(self):
+        """Hesap gizli mi kontrol et"""
+        try:
+            private_indicators = [
+                '//*[contains(text(), "This Account is Private") or contains(text(), "Bu Hesap Gizli")]',
+                '//*[contains(text(), "Private Account") or contains(text(), "Gizli Hesap")]',
+                '//span[contains(text(), "Follow to see their photos and videos")]',
+            ]
+            for xpath in private_indicators:
+                try:
+                    elem = self.driver.find_element(By.XPATH, xpath)
+                    if elem.is_displayed():
+                        logger.info(f"Gizli hesap tespit edildi: {elem.text}")
+                        return True
+                except:
+                    pass
+            return False
+        except:
+            return False
+
     def _find_follow_button(self):
+        # ===== 1. Standart seciciler =====
         selectors = [
             '//button[contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "follow") '
             'and not(contains(translate(text(), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "following")) '
@@ -777,12 +783,13 @@ class InstagramBot:
         ]
         for xpath in selectors:
             try:
-                btn = self.wait.until(EC.presence_of_element_located((By.XPATH, xpath)))
+                btn = self.wait_short.until(EC.presence_of_element_located((By.XPATH, xpath)))
                 logger.info(f"Takip butonu bulundu: {xpath}")
                 return btn
             except:
                 pass
 
+        # ===== 2. Genel arama - tum butonlar =====
         try:
             all_elements = self.driver.find_elements(
                 By.XPATH,
@@ -796,10 +803,24 @@ class InstagramBot:
                     return elem
         except:
             pass
+
+        # ===== 3. Header ici arama =====
+        try:
+            header = self.driver.find_element(By.TAG_NAME, "header")
+            buttons = header.find_elements(By.XPATH, './/button | .//div[@role="button"]')
+            for btn in buttons:
+                text = btn.text.lower()
+                if 'follow' in text and 'following' not in text and 'unfollow' not in text:
+                    logger.info(f"Takip butonu bulundu (header): text='{btn.text[:50]}'")
+                    return btn
+        except:
+            pass
+
         return None
 
     def _js_follow_click(self, target_username, source_account, bot_id):
         try:
+            # ===== 1. Standart JS tiklama =====
             js_code = (
                 'var elements = document.querySelectorAll("button, div[role=\'button\']"); '
                 'for (var i = 0; i < elements.length; i++) { '
@@ -815,21 +836,40 @@ class InstagramBot:
                 self._db_update_approval(target_username, 'approved')
                 self._db_add_history(target_username, source_account, bot_id, 'followed', 'success')
                 self._db_increment_daily_stat('approved')
-                logger.info(f"✅ ONAYLI: {target_username} (JS ile takip edildi)")
+                logger.info(f"ONAYLI: {target_username} (JS ile takip edildi)")
                 time.sleep(random.uniform(4, 7))
                 return True
-            else:
-                logger.warning(f"⚠️ {target_username} icin takip butonu bulunamadi (JS)")
-                return False
+
+            # ===== 2. Header ici JS arama =====
+            js_code2 = (
+                'var header = document.querySelector("header"); '
+                'if (header) { '
+                'var buttons = header.querySelectorAll("button, div[role=\'button\']"); '
+                'for (var i = 0; i < buttons.length; i++) { '
+                'var text = (buttons[i].innerText || buttons[i].textContent || "").toLowerCase(); '
+                'if (text.includes("follow") && !text.includes("following") && !text.includes("unfollow")) '
+                '{ buttons[i].click(); return "header-clicked: " + text; } } } '
+                'return "header-not-found";'
+            )
+            js_result2 = self.driver.execute_script(js_code2)
+            logger.info(f"Header JS sonucu: {js_result2}")
+            if "clicked" in str(js_result2):
+                self._db_update_status(target_username, 'followed')
+                self._db_update_approval(target_username, 'approved')
+                self._db_add_history(target_username, source_account, bot_id, 'followed', 'success')
+                self._db_increment_daily_stat('approved')
+                logger.info(f"ONAYLI: {target_username} (Header JS ile takip edildi)")
+                time.sleep(random.uniform(4, 7))
+                return True
+
         except Exception as e:
             logger.error(f"JS takip hatasi: {e}")
-            return False
+        return False
 
-    # ============ SÜREKLİ DÖNGÜ - TAKİP ETME (BOT 4) ============
+    # ============ FOLLOW LOOP - GELISTIRILMIS ============
 
     def follow_loop(self, batch_size=50, delay=5, break_after=400, break_duration=100,
                     session_limit=1000, bot_id=4, source_account=""):
-        """Sürekli döngüde veritabanından takip et - durdurana kadar devam"""
         logger.info(f"\n{'='*60}")
         logger.info("TAKIP ETME DONGUSU BASLADI")
         logger.info("Durdurmak icin Ctrl+C veya panelden durdur")
@@ -840,12 +880,20 @@ class InstagramBot:
         failed = 0
         already_following = 0
         cycle = 0
+        profile_dir = None  # Yeniden baslatma icin profil
 
         while self.running:
             cycle += 1
             logger.info(f"\n{'='*60}")
             logger.info(f"TAKIP DONGUSU #{cycle}")
             logger.info(f"{'='*60}")
+
+            # Driver hala calisiyor mu kontrol et
+            if not self._check_driver_alive():
+                logger.warning("Driver calismiyor, yeniden baslatiliyor...")
+                if not self._restart_driver(profile_dir):
+                    logger.error("Driver yeniden baslatilamadi, dongu durduruluyor...")
+                    break
 
             pending = self._db_get_pending_for_follow(batch_size)
             if not pending:
@@ -862,12 +910,33 @@ class InstagramBot:
                 if not self.running:
                     break
 
+                # Cok fazla ardışik hata varsa mola ver
+                if self.consecutive_errors >= 5:
+                    logger.warning(f"{self.consecutive_errors} ardisik hata, 60 saniye mola...")
+                    for _ in range(60):
+                        if not self.running:
+                            break
+                        time.sleep(1)
+                    self.consecutive_errors = 0
+                    # Driver'i yeniden baslat
+                    if not self._check_driver_alive():
+                        self._restart_driver(profile_dir)
+
                 logger.info(f"\n{'='*50}")
                 logger.info(f"Takip {total_processed+1}: {username}")
                 logger.info(f"{'='*50}")
 
                 user_source = src if src else source_account
                 result = self.follow_user(username, user_source, bot_id)
+
+                if result == "restart_needed":
+                    logger.warning("Driver yeniden baslatma gerekiyor...")
+                    if not self._restart_driver(profile_dir):
+                        logger.error("Yeniden baslatma basarisiz, dongu durduruluyor...")
+                        self.running = False
+                        break
+                    # Bu kullaniciyi tekrar dene
+                    result = self.follow_user(username, user_source, bot_id)
 
                 if result is True:
                     successful += 1
@@ -878,7 +947,7 @@ class InstagramBot:
 
                 total_processed += 1
 
-                # Mola kontrolü
+                # Mola kontrolu
                 if total_processed % break_after == 0 and self.running:
                     logger.info(f"\n{'='*50}")
                     logger.info(f"MOLA: {break_duration} saniye bekleniyor...")
@@ -887,6 +956,9 @@ class InstagramBot:
                         if not self.running:
                             break
                         time.sleep(1)
+                    # Moladan sonra driver kontrolu
+                    if not self._check_driver_alive():
+                        self._restart_driver(profile_dir)
 
                 if self.running:
                     wait_time = random.uniform(delay, delay + 10)
@@ -898,17 +970,18 @@ class InstagramBot:
         logger.info(f"\n{'='*60}")
         logger.info("TAKIP ISLEMI OZETI")
         logger.info(f"{'='*60}")
-        logger.info(f"✅ Basarili (Onayli): {successful}")
-        logger.info(f"ℹ️ Zaten Takip Edilen: {already_following}")
-        logger.info(f"❌ Basarisiz (Onaysiz): {failed}")
-        logger.info(f"📊 Toplam Islenen: {total_processed}")
+        logger.info(f"Basarili (Onayli): {successful}")
+        logger.info(f"Zaten Takip Edilen: {already_following}")
+        logger.info(f"Basarisiz (Onaysiz): {failed}")
+        logger.info(f"Toplam Islenen: {total_processed}")
         logger.info(f"{'='*60}")
 
         return successful, already_following, failed, total_processed
 
-    # ============ CLEANUP ============
-
     def close(self):
         if self.driver:
-            self.driver.quit()
-            logger.info("Tarayici kapatildi")
+            try:
+                self.driver.quit()
+                logger.info("Tarayici kapatildi")
+            except:
+                pass

@@ -1,4 +1,4 @@
-"""Instagram Bot Paneli - Ana Flask Uygulaması"""
+"""Instagram Bot Paneli - Ana Flask Uygulamasi"""
 from flask import Flask, request, jsonify, Response, render_template
 import json
 import os
@@ -10,7 +10,11 @@ from database import (
     init_db, db_add_account, db_get_accounts, db_get_account,
     db_delete_account, db_toggle_account, db_get_follow_history,
     db_get_stats, db_mark_all_pending, db_clear_history,
-    db_get_daily_stats
+    db_get_daily_stats,
+    # YENI FONKSIYONLAR
+    db_add_target, db_get_targets, db_delete_target, db_toggle_target,
+    db_save_bot_settings, db_get_bot_settings, db_get_all_bot_settings,
+    db_get_failed_list, db_allow_retry
 )
 from bot_runner import bot_runner, get_log_file, read_pid
 
@@ -20,7 +24,7 @@ init_db()
 
 
 def _pid_exists(pid):
-    """psutil olmadan PID kontrolü"""
+    """psutil olmadan PID kontrolu"""
     try:
         os.kill(pid, 0)
         return True
@@ -35,7 +39,7 @@ def index():
 
 @app.route('/api/status')
 def get_status():
-    """Çalışan bot'ları tespit et"""
+    """Calisan bot'lari tespit et"""
     running = {}
     for bot_num in [1, 2, 3, 4]:
         pid = read_pid(bot_num)
@@ -45,6 +49,8 @@ def get_status():
             running[bot_num] = {"pid": None, "running": False}
     return jsonify({"ok": True, "running": running})
 
+
+# ============ HESAP ISLEMLERI ============
 
 @app.route('/api/accounts', methods=['GET'])
 def get_accounts():
@@ -87,6 +93,162 @@ def toggle_account_route(account_id):
     return jsonify({"ok": True, "message": "Hesap " + status + " yapildi"})
 
 
+# ============ HEDEF HESAP ISLEMLERI (YENI) ============
+
+@app.route('/api/targets', methods=['GET'])
+def get_targets():
+    account_id = int(request.args.get('account', 0))
+    if not account_id:
+        return jsonify({"ok": False, "message": "Hesap secilmedi"})
+    targets = db_get_targets(account_id)
+    return jsonify({
+        "ok": True,
+        "targets": [
+            {"id": row[0], "username": row[1], "is_active": bool(row[2])}
+            for row in targets
+        ]
+    })
+
+
+@app.route('/api/targets', methods=['POST'])
+def add_target():
+    data = request.get_json()
+    account_id = data.get('account_id', 0)
+    username = data.get('username', '').strip().replace('@', '')
+    if not account_id or not username:
+        return jsonify({"ok": False, "message": "Hesap ve kullanici adi gerekli!"})
+    target_id = db_add_target(account_id, username)
+    if target_id:
+        return jsonify({"ok": True, "message": "Hedef eklendi", "id": target_id})
+    return jsonify({"ok": False, "message": "Hedef zaten var veya eklenemedi"})
+
+
+@app.route('/api/targets/<int:target_id>', methods=['DELETE'])
+def delete_target_route(target_id):
+    db_delete_target(target_id)
+    return jsonify({"ok": True, "message": "Hedef silindi"})
+
+
+@app.route('/api/targets/<int:target_id>/toggle', methods=['POST'])
+def toggle_target_route(target_id):
+    data = request.get_json()
+    is_active = data.get('is_active', 1)
+    db_toggle_target(target_id, is_active)
+    return jsonify({"ok": True, "message": "Hedef guncellendi"})
+
+
+# ============ BOT AYARLARI (YENI) ============
+
+@app.route('/api/bot-settings/<int:bot_id>', methods=['GET'])
+def get_bot_settings(bot_id):
+    settings = db_get_bot_settings(bot_id)
+    return jsonify({"ok": True, "settings": settings})
+
+
+@app.route('/api/bot-settings/<int:bot_id>', methods=['POST'])
+def save_bot_settings(bot_id):
+    data = request.get_json()
+    account_id = data.get('account_id', 0)
+    settings = data.get('settings', {})
+    if db_save_bot_settings(bot_id, account_id, settings):
+        return jsonify({"ok": True, "message": "Ayarlar kaydedildi"})
+    return jsonify({"ok": False, "message": "Ayarlar kaydedilemedi"})
+
+
+@app.route('/api/bot-settings', methods=['GET'])
+def get_all_bot_settings():
+    settings = db_get_all_bot_settings()
+    return jsonify({"ok": True, "settings": settings})
+
+
+# ============ BASARISIZ TAKIP KONTROLU (YENI) ============
+
+@app.route('/api/failed/<int:account_id>', methods=['GET'])
+def get_failed_list(account_id):
+    failed = db_get_failed_list(account_id)
+    return jsonify({
+        "ok": True,
+        "failed": [
+            {"username": row[0], "fail_count": row[1], "can_retry": bool(row[2]), "last_failed": row[3]}
+            for row in failed
+        ]
+    })
+
+
+@app.route('/api/failed/allow-retry', methods=['POST'])
+def allow_retry():
+    data = request.get_json()
+    username = data.get('username', '')
+    account_id = data.get('account_id', 0)
+    if not username or not account_id:
+        return jsonify({"ok": False, "message": "Kullanici adi ve hesap gerekli!"})
+    db_allow_retry(username, account_id)
+    return jsonify({"ok": True, "message": f"@{username} tekrar deneme izni verildi"})
+
+
+# ============ BOT BASLATMA/DURDURMA ============
+
+@app.route('/api/start/<int:bot_num>', methods=['POST'])
+def start_bot(bot_num):
+    data = request.get_json()
+    account_id = int(data.get('account_id', 0))
+    if not account_id:
+        return jsonify({"ok": False, "message": "Hesap secilmedi!"})
+
+    account = db_get_account(account_id)
+    if not account:
+        return jsonify({"ok": False, "message": "Hesap bulunamadi!"})
+
+    username = account[2]
+    password = account[3]
+
+    # ===== YENI: Ayarlari kaydet =====
+    db_save_bot_settings(bot_num, account_id, data)
+
+    success, message = bot_runner.start(bot_num, account_id, username, password, data)
+    return jsonify({"ok": success, "message": message})
+
+
+@app.route('/api/stop/<int:bot_num>', methods=['POST'])
+def stop_bot(bot_num):
+    bot_runner.stop(bot_num)
+    return jsonify({"ok": True, "message": f"Bot {bot_num} durduruldu"})
+
+
+# ============ LOG STREAMING ============
+
+@app.route('/api/logs/<int:bot_num>')
+def get_logs(bot_num):
+    lines = bot_runner.get_log_tail(bot_num, 200)
+    return jsonify({"ok": True, "logs": lines})
+
+
+@app.route('/api/stream/<int:bot_num>')
+def stream_logs(bot_num):
+    def generate():
+        log_file = get_log_file(bot_num)
+        if not os.path.exists(log_file):
+            yield "data: Log dosyasi bulunamadi\n\n"
+            return
+
+        with open(log_file, 'r', encoding='utf-8') as f:
+            f.seek(0, 2)
+            while True:
+                line = f.readline()
+                if line:
+                    yield f"data: {line}\n\n"
+                else:
+                    time.sleep(1)
+                    pid = read_pid(bot_num)
+                    if not pid or not _pid_exists(pid):
+                        yield "data: [BOT DURDU]\n\n"
+                        break
+
+    return Response(generate(), mimetype='text/event-stream')
+
+
+# ============ VERITABANI ISTATISTIKLERI ============
+
 @app.route('/api/history')
 def get_history():
     bot_id = int(request.args.get('bot', 4))
@@ -99,182 +261,36 @@ def get_history():
     return jsonify({
         "ok": True,
         "history": [
-            {
-                "username": row[0],
-                "target_account": row[1],
-                "status": row[2],
-                "result": row[3],
-                "followed_at": row[4]
-            } for row in history
+            {"username": row[0], "target": row[1], "status": row[2], "result": row[3], "time": row[4]}
+            for row in history
         ],
         "stats": stats,
-        "daily_stats": [
-            {"date": row[0], "approved": row[1], "rejected": row[2]} for row in daily
+        "daily": [
+            {"date": row[0], "approved": row[1], "rejected": row[2]}
+            for row in daily
         ]
     })
 
 
-@app.route('/api/reset_failed', methods=['POST'])
+@app.route('/api/reset-failed', methods=['POST'])
 def reset_failed():
-    bot_id = int(request.args.get('bot', 4))
-    account_id = int(request.args.get('account', 0))
+    data = request.get_json()
+    account_id = int(data.get('account_id', 0))
     if not account_id:
         return jsonify({"ok": False, "message": "Hesap secilmedi"})
     db_mark_all_pending(account_id)
-    return jsonify({"ok": True, "message": "Basarisiz kullanicilar tekrar siraya alindi"})
+    return jsonify({"ok": True, "message": "Izni olan basarisizlar tekrar siraya alindi"})
 
 
-@app.route('/api/clear_history', methods=['POST'])
+@app.route('/api/clear-history', methods=['POST'])
 def clear_history():
-    bot_id = int(request.args.get('bot', 4))
-    account_id = int(request.args.get('account', 0))
+    data = request.get_json()
+    account_id = int(data.get('account_id', 0))
     if not account_id:
         return jsonify({"ok": False, "message": "Hesap secilmedi"})
     db_clear_history(account_id)
     return jsonify({"ok": True, "message": "Gecmis temizlendi"})
 
 
-@app.route('/api/start', methods=['POST', 'GET'])
-def start_bot():
-    bot_num = int(request.args.get('bot', 1))
-
-    data = {}
-    if request.method == 'POST':
-        try:
-            data = request.get_json(force=True, silent=True) or {}
-        except:
-            data = {}
-
-    if not data:
-        data = {
-            'account_id': request.args.get('account_id', ''),
-            'target': request.args.get('target', ''),
-            'targets': request.args.getlist('targets') or [request.args.get('target', '')],
-            'max_per_target': request.args.get('max_per_target', '50'),
-            'loop_delay': request.args.get('loop_delay', '60'),
-            'batch_size': request.args.get('batch_size', '50'),
-            'delay': request.args.get('delay', '5'),
-            'break_after': request.args.get('break_after', '400'),
-            'break_duration': request.args.get('break_duration', '100'),
-            'mode': request.args.get('mode', 'collect_loop')
-        }
-
-    account_id = 0
-    try:
-        account_id = int(data.get('account_id', 0))
-    except:
-        account_id = 0
-
-    if not account_id:
-        return jsonify({"ok": False, "message": "Hesap secilmedi"})
-
-    print("[DEBUG] Bot " + str(bot_num) + " baslatiliyor, account_id=" + str(account_id))
-
-    account = db_get_account(account_id)
-    if not account:
-        print("[DEBUG] Hesap bulunamadi: " + str(account_id))
-        return jsonify({"ok": False, "message": "Hesap bulunamadi"})
-    print("[DEBUG] Hesap bulundu: " + account[2])
-
-    username = account[2]
-    password = account[3]
-
-    ok, message = bot_runner.start(bot_num, account_id, username, password, data)
-    return jsonify({"ok": ok, "message": message})
-
-
-@app.route('/api/stop', methods=['GET', 'POST'])
-def stop_bot():
-    bot_num = int(request.args.get('bot', 1))
-    bot_runner.stop(bot_num)
-    return jsonify({"ok": True, "message": "Bot " + str(bot_num) + " durduruldu"})
-
-
-@app.route('/api/stream', methods=['GET'])
-def stream():
-    bot_num = int(request.args.get('bot', 1))
-    account_id = int(request.args.get('account', 0))
-    reconnect = request.args.get('reconnect', 'false') == 'true'
-
-    def generate():
-        log_file = get_log_file(bot_num)
-
-        max_wait = MAX_WAIT_STREAM
-        waited = 0
-        while waited < max_wait:
-            if bot_runner.is_running(bot_num):
-                break
-            time.sleep(0.5)
-            waited += 0.5
-            yield "data: " + json.dumps({"type":"log","msg":"Bot baslatiliyor...","level":"info"}) + "\n\n"
-
-        if not bot_runner.is_running(bot_num):
-            yield "data: " + json.dumps({"type":"log","msg":"Bot calismiyor veya baslatilamadi","level":"error"}) + "\n\n"
-            return
-
-        if not os.path.exists(log_file):
-            yield "data: " + json.dumps({"type":"log","msg":"Log dosyasi bulunamadi","level":"error"}) + "\n\n"
-            return
-
-        if reconnect:
-            tail_lines = bot_runner.get_log_tail(bot_num, 50)
-            for line in tail_lines:
-                line = line.strip()
-                if line:
-                    yield "data: " + json.dumps({"type":"log","msg":"[RECONNECT] " + line,"level":"info"}) + "\n\n"
-            yield "data: " + json.dumps({"type":"log","msg":"--- Yeniden baglanildi, canli log ---","level":"success"}) + "\n\n"
-
-        try:
-            with open(log_file, 'r', encoding='utf-8') as f:
-                f.seek(0, 2)
-
-                while bot_runner.is_running(bot_num):
-                    line = f.readline()
-                    if line:
-                        line = line.strip()
-                        if line:
-                            msg = line
-                            level = 'info'
-
-                            if 'ERROR' in line or 'hata' in line.lower() or 'basarisiz' in line.lower() or 'ONAYSIZ' in line:
-                                level = 'error'
-                            elif '✅' in line or 'ONAYLI' in line or 'Basarili' in line:
-                                level = 'success'
-
-                            if 'YENI' in line and 'Kaynak' in line:
-                                parts = line.split(': ')
-                                if len(parts) > 1:
-                                    username = parts[1].split(' ')[0].strip()
-                                    yield "data: " + json.dumps({"type":"follower","name":username}) + "\n\n"
-
-                            if 'ONAYLI' in line:
-                                parts = line.split(': ')
-                                if len(parts) > 1:
-                                    username = parts[1].split(' ')[0].strip()
-                                    yield "data: " + json.dumps({"type":"status","name":username,"status":"done"}) + "\n\n"
-
-                            if 'ONAYSIZ' in line:
-                                parts = line.split(': ')
-                                if len(parts) > 1:
-                                    username = parts[1].split(' ')[0].strip()
-                                    yield "data: " + json.dumps({"type":"status","name":username,"status":"fail"}) + "\n\n"
-
-                            yield "data: " + json.dumps({"type":"log","msg":msg,"level":level}) + "\n\n"
-                    else:
-                        time.sleep(0.5)
-
-                yield "data: " + json.dumps({"type":"done","msg":"Bot durduruldu"}) + "\n\n"
-        except Exception as e:
-            yield "data: " + json.dumps({"type":"log","msg":"Stream hatasi: " + str(e),"level":"error"}) + "\n\n"
-
-    return Response(generate(), mimetype='text/event-stream')
-
-
 if __name__ == '__main__':
-    print("="*60)
-    print("INSTAGRAM BOT PANELI")
-    print("="*60)
-    print("Panel aciliyor: http://127.0.0.1:" + str(FLASK_PORT))
-    print("Telefondan erisim: http://<telefon-ip>:" + str(FLASK_PORT))
-    print("="*60)
     app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG, threaded=FLASK_THREADED)

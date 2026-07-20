@@ -1,9 +1,9 @@
-"""Bot process yönetimi - PID takibi, detached mode, reconnect (psutil'siz)"""
+"""Bot process yonetimi - PID takibi, detached mode, reconnect (psutil'siz)"""
 import os
 import time
 import subprocess
 import signal
-from config import BOT_FILE_TEMPLATE, PID_DIR
+from config import BOT_FILE_TEMPLATE, PID_DIR, get_profile_dir
 
 
 def get_pid_file(bot_num):
@@ -15,7 +15,7 @@ def get_log_file(bot_num):
 
 
 def _pid_exists(pid):
-    """psutil olmadan PID kontrolü"""
+    """psutil olmadan PID kontrolu"""
     try:
         os.kill(pid, 0)
         return True
@@ -24,7 +24,7 @@ def _pid_exists(pid):
 
 
 def read_pid(bot_num):
-    """PID dosyasından process ID oku"""
+    """PID dosyasindan process ID oku"""
     pid_file = get_pid_file(bot_num)
     if os.path.exists(pid_file):
         try:
@@ -40,35 +40,36 @@ def read_pid(bot_num):
 
 
 def write_pid(bot_num, pid):
-    """PID dosyasına yaz"""
+    """PID dosyasina yaz"""
     pid_file = get_pid_file(bot_num)
     with open(pid_file, 'w') as f:
         f.write(str(pid))
 
 
 def remove_pid(bot_num):
-    """PID dosyasını sil"""
+    """PID dosyasini sil"""
     pid_file = get_pid_file(bot_num)
     if os.path.exists(pid_file):
         os.remove(pid_file)
 
 
 class BotRunner:
-    """Bot process'lerini yönetir - detached mode, reconnect destekli"""
+    """Bot process'lerini yonetir - detached mode, reconnect destekli"""
 
     def __init__(self):
         self.processes = {1: None, 2: None, 3: None, 4: None}
         self.log_files = {1: None, 2: None, 3: None, 4: None}
+        self.profile_dirs = {}  # Bot numarasi -> profil dizini
 
     def is_running(self, bot_num):
-        """Bot çalışıyor mu? (PID dosyası kontrolü)"""
+        """Bot calisiyor mu? (PID dosyasi kontrolu)"""
         pid = read_pid(bot_num)
         if pid and _pid_exists(pid):
             return True
         return False
 
     def get_process(self, bot_num):
-        """Çalışan process'i getir (reconnect için)"""
+        """Calisan process'i getir (reconnect icin)"""
         pid = read_pid(bot_num)
         if pid and _pid_exists(pid):
             return pid
@@ -99,26 +100,30 @@ class BotRunner:
         return True
 
     def start(self, bot_num, account_id, username, password, data):
-        """Bot'u detached modda başlat"""
+        """Bot'u detached modda baslat"""
         self.stop(bot_num)
 
         mode = data.get('mode', 'collect')
         bot_file = BOT_FILE_TEMPLATE.format(bot_num=bot_num)
         log_file = get_log_file(bot_num)
 
-        bot_script = self._build_bot_script(account_id, username, password, bot_num, mode, data)
+        # Her bot icin ayri profil
+        profile_dir = get_profile_dir(bot_num)
+        self.profile_dirs[bot_num] = profile_dir
+
+        bot_script = self._build_bot_script(account_id, username, password, bot_num, mode, data, profile_dir)
 
         with open(bot_file, 'w', encoding='utf-8') as f:
             f.write(bot_script)
 
-        # Log dosyasını aç (append modunda)
+        # Log dosyasini ac (append modunda)
         log_fh = open(log_file, 'a', encoding='utf-8')
         self.log_files[bot_num] = log_fh
 
         env = os.environ.copy()
         env['PYTHONUNBUFFERED'] = '1'
 
-        # DETACHED MODE: setsid ile yeni session oluştur
+        # DETACHED MODE: setsid ile yeni session olustur
         try:
             self.processes[bot_num] = subprocess.Popen(
                 ['setsid', 'python', bot_file],
@@ -131,7 +136,7 @@ class BotRunner:
                 preexec_fn=os.setsid
             )
         except Exception as e:
-            # setsid yoksa normal başlat
+            # setsid yoksa normal baslat
             self.processes[bot_num] = subprocess.Popen(
                 ['python', bot_file],
                 stdout=log_fh,
@@ -147,11 +152,10 @@ class BotRunner:
             write_pid(bot_num, self.processes[bot_num].pid)
             return True, "Bot " + str(bot_num) + " baslatildi (Hesap #" + str(account_id) + ")"
         else:
-            # setsid ile başlatıldıysa PID farklı olabilir, log dosyasına bak
             return True, "Bot " + str(bot_num) + " baslatildi (Hesap #" + str(account_id) + ") - Detached"
 
     def get_stdout(self, bot_num):
-        """Bot'un stdout'unu al - log dosyasından oku"""
+        """Bot'un stdout'unu al - log dosyasindan oku"""
         log_file = get_log_file(bot_num)
         if os.path.exists(log_file):
             try:
@@ -161,7 +165,7 @@ class BotRunner:
         return None
 
     def get_log_tail(self, bot_num, lines=100):
-        """Log dosyasının son N satırını getir"""
+        """Log dosyasinin son N satirini getir"""
         log_file = get_log_file(bot_num)
         if os.path.exists(log_file):
             try:
@@ -172,7 +176,7 @@ class BotRunner:
                 pass
         return []
 
-    def _build_bot_script(self, account_id, username, password, bot_num, mode, data):
+    def _build_bot_script(self, account_id, username, password, bot_num, mode, data, profile_dir):
         lines = []
         lines.append("from bot_engine import InstagramBot")
         lines.append("import logging")
@@ -187,6 +191,7 @@ class BotRunner:
         lines.append("ACCOUNT_ID = " + str(account_id))
         lines.append("YOUR_USERNAME = " + repr(username))
         lines.append("YOUR_PASSWORD = " + repr(password))
+        lines.append("PROFILE_DIR = " + repr(profile_dir))
         lines.append("")
         lines.append("bot = InstagramBot(YOUR_USERNAME, YOUR_PASSWORD, ACCOUNT_ID)")
         lines.append("")
@@ -198,17 +203,21 @@ class BotRunner:
         lines.append("signal.signal(signal.SIGINT, signal_handler)")
         lines.append("")
         lines.append("try:")
-        lines.append("    bot.setup_driver()")
+        lines.append("    bot.setup_driver(profile_dir=PROFILE_DIR)")
         lines.append("    if bot.login():")
 
         if bot_num in [1, 2, 3]:
-            targets = data.get('targets', [data.get('target', 'evren_gayrimenkul_')])
-            if isinstance(targets, str):
-                targets = [targets]
+            # Hedefleri veritabanindan al
+            lines.append("        from database import db_get_targets")
+            lines.append("        targets = [t[1] for t in db_get_targets(ACCOUNT_ID) if t[2] == 1]")
+            lines.append("        if not targets:")
+            lines.append("            logger.error('Aktif hedef hesap bulunamadi! Veritabanindan ekleyin.')")
+            lines.append("            sys.exit(1)")
+            lines.append("        logger.info(f'Hedef hesaplar: {targets}')")
+
             max_per = int(data.get('max_per_target', 50))
             loop_delay = int(data.get('loop_delay', 60))
 
-            lines.append("        targets = " + repr(targets))
             lines.append("        bot.collect_followers_loop(")
             lines.append("            targets=targets,")
             lines.append("            max_per_target=" + str(max_per) + ",")

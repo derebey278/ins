@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 ACCOUNT_ID = 1
 YOUR_USERNAME = 'nusaybinemlak47'
 YOUR_PASSWORD = 'ASLAN190547'
+PROFILE_DIR = 'chrome_profiles/bot_4'
 
 bot = InstagramBot(YOUR_USERNAME, YOUR_PASSWORD, ACCOUNT_ID)
 
@@ -22,13 +23,13 @@ signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
 try:
-    bot.setup_driver()
+    bot.setup_driver(profile_dir=PROFILE_DIR)
     if bot.login():
         bot.follow_loop(
-            batch_size=10,
-            delay=1,
+            batch_size=50,
+            delay=5,
             break_after=400,
-            break_duration=50,
+            break_duration=100,
             bot_id=4,
             source_account=''
         )

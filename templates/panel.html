@@ -216,6 +216,24 @@
   .daily-stat-date { color: #888; margin-bottom: 4px; }
   .daily-stat-approved { color: #00d26a; font-weight: 600; }
   .daily-stat-rejected { color: #ff4757; font-weight: 600; }
+
+  /* YENI: Hedef hesap listesi */
+  .target-list {
+    max-height: 200px; overflow-y: auto;
+    background: rgba(0,0,0,0.2); border-radius: 10px;
+    padding: 10px; margin-top: 10px;
+  }
+  .target-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: rgba(255,255,255,0.05);
+    border-radius: 8px; margin-bottom: 6px;
+    font-size: 0.85rem;
+  }
+  .target-item:last-child { margin-bottom: 0; }
+  .target-item .target-name { color: #fff; }
+  .target-item .target-actions { display: flex; gap: 6px; }
+  .target-item.inactive { opacity: 0.5; }
+
   @media (max-width: 600px) {
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .form-grid { grid-template-columns: 1fr; }
@@ -233,22 +251,23 @@
     <div class="tab" data-tab="tab2">Bot 2 - Topla</div>
     <div class="tab" data-tab="tab3">Bot 3 - Topla</div>
     <div class="tab" data-tab="tab4">Bot 4 - Takip Et</div>
-    <div class="tab" data-tab="tab5">Veritabani</div>
-    <div class="tab" data-tab="tab6">Hesaplar</div>
+    <div class="tab" data-tab="tab5">Hedef Hesaplar</div>
+    <div class="tab" data-tab="tab6">Veritabani</div>
+    <div class="tab" data-tab="tab7">Hesaplar</div>
   </div>
 
   <!-- BOT 1 - TEK HEDEF SUREKLI DONGU -->
   <div id="tab1" class="tab-content active">
     <div class="card">
-      <div class="card-title">🔄 Bot 1 - Surekli Dongu (Tek Hedef)</div>
+      <div class="card-title">Bot 1 - Surekli Dongu (Tek Hedef)</div>
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label">Hesap Sec</label>
           <select class="form-select" id="b1-account"><option value="">Yukleniyor...</option></select>
         </div>
         <div class="form-group">
-          <label class="form-label">Hedef Hesap</label>
-          <input class="form-input" id="b1-target" value="evren_gayrimenkul_" placeholder="@hedef">
+          <label class="form-label">Hedef Hesap (Veritabanindan otomatik doldurulur)</label>
+          <input class="form-input" id="b1-target" placeholder="Veritabanindan alinacak..." readonly style="opacity:0.7;">
         </div>
         <div class="form-group">
           <label class="form-label">Hedef Basina Max</label>
@@ -262,6 +281,7 @@
       <div class="btn-row">
         <button class="btn btn-primary" id="btn-start-1">Baslat (Surekli)</button>
         <button class="btn btn-success" id="btn-stop-1">Durdur</button>
+        <button class="btn btn-secondary" onclick="saveCurrentBotSettings(1)">Ayarlari Kaydet</button>
       </div>
     </div>
   </div>
@@ -269,7 +289,7 @@
   <!-- BOT 2 - COKLU HEDEF SUREKLI DONGU -->
   <div id="tab2" class="tab-content">
     <div class="card">
-      <div class="card-title">🔄 Bot 2 - Surekli Dongu (Coklu Hedef)</div>
+      <div class="card-title">Bot 2 - Surekli Dongu (Coklu Hedef)</div>
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label">Hesap Sec</label>
@@ -278,9 +298,8 @@
       </div>
     </div>
     <div class="card">
-      <div class="card-title">Hedef Hesaplar (Her satira bir hesap)</div>
-      <textarea class="form-textarea" id="b2-targets">evren_gayrimenkul_
-nusaybingunduzemlak</textarea>
+      <div class="card-title">Hedef Hesaplar (Veritabanindan otomatik alinir)</div>
+      <textarea class="form-textarea" id="b2-targets" placeholder="Veritabanindan alinacak..." readonly style="opacity:0.7;"></textarea>
       <div class="form-grid" style="margin-top:12px;">
         <div class="form-group">
           <label class="form-label">Hedef Basina Max</label>
@@ -294,6 +313,7 @@ nusaybingunduzemlak</textarea>
       <div class="btn-row">
         <button class="btn btn-primary" id="btn-start-2">Baslat (Surekli)</button>
         <button class="btn btn-success" id="btn-stop-2">Durdur</button>
+        <button class="btn btn-secondary" onclick="saveCurrentBotSettings(2)">Ayarlari Kaydet</button>
       </div>
     </div>
   </div>
@@ -301,15 +321,15 @@ nusaybingunduzemlak</textarea>
   <!-- BOT 3 - TEK HESAP SUREKLI DONGU -->
   <div id="tab3" class="tab-content">
     <div class="card">
-      <div class="card-title">🔄 Bot 3 - Surekli Dongu (Tek Hesap)</div>
+      <div class="card-title">Bot 3 - Surekli Dongu (Tek Hesap)</div>
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label">Hesap Sec</label>
           <select class="form-select" id="b3-account"><option value="">Yukleniyor...</option></select>
         </div>
         <div class="form-group">
-          <label class="form-label">Hedef Hesap</label>
-          <input class="form-input" id="b3-target" value="nusaybin_gerceklerii" placeholder="@hedef">
+          <label class="form-label">Hedef Hesap (Veritabanindan otomatik doldurulur)</label>
+          <input class="form-input" id="b3-target" placeholder="Veritabanindan alinacak..." readonly style="opacity:0.7;">
         </div>
         <div class="form-group">
           <label class="form-label">Hedef Basina Max</label>
@@ -323,6 +343,7 @@ nusaybingunduzemlak</textarea>
       <div class="btn-row">
         <button class="btn btn-primary" id="btn-start-3">Baslat (Surekli)</button>
         <button class="btn btn-success" id="btn-stop-3">Durdur</button>
+        <button class="btn btn-secondary" onclick="saveCurrentBotSettings(3)">Ayarlari Kaydet</button>
       </div>
     </div>
   </div>
@@ -330,7 +351,7 @@ nusaybingunduzemlak</textarea>
   <!-- BOT 4 - TAKIP ETME -->
   <div id="tab4" class="tab-content">
     <div class="card">
-      <div class="card-title">✅ Bot 4 - Takip Etme (Onay Sistemi)</div>
+      <div class="card-title">Bot 4 - Takip Etme (Onay Sistemi)</div>
       <div class="form-grid">
         <div class="form-group">
           <label class="form-label">Hesap Sec</label>
@@ -356,20 +377,47 @@ nusaybingunduzemlak</textarea>
       <div class="btn-row">
         <button class="btn btn-primary" id="btn-start-4">Baslat (Surekli)</button>
         <button class="btn btn-success" id="btn-stop-4">Durdur</button>
+        <button class="btn btn-secondary" onclick="saveCurrentBotSettings(4)">Ayarlari Kaydet</button>
       </div>
     </div>
     <div class="card">
-      <div class="card-title">ℹ️ Onay Sistemi</div>
+      <div class="card-title">Onay Sistemi</div>
       <p style="font-size:0.85rem;color:#aaa;line-height:1.6;">
-        ✅ <b>Onayli (Approved):</b> Basariyla takip edilen kullanicilar<br>
-        ❌ <b>Onaysiz (Rejected):</b> Takip edilemeyen kullanicilar (buton bulunamadi, hesap gizli, vb.)<br>
-        🔄 <b>Surekli Dongu:</b> Veritabaninda kullanici kalmayana kadar devam eder, sonra yeni kullanici bekler
+        <b>Onayli (Approved):</b> Basariyla takip edilen kullanicilar<br>
+        <b>Onaysiz (Rejected):</b> Takip edilemeyen kullanicilar (buton bulunamadi, hesap gizli, vb.)<br>
+        <b style="color:#ffa502;">Tekrar Deneme:</b> Basarisiz olanlar otomatik tekrarlanmaz. "Tekrar Dene" butonu ile izin vermeniz gerekir.
       </p>
     </div>
   </div>
 
-  <!-- VERITABANI -->
+  <!-- HEDEF HESAPLAR (YENI) -->
   <div id="tab5" class="tab-content">
+    <div class="card">
+      <div class="card-title">Hedef Hesap Ekle</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label class="form-label">Hesap Sec</label>
+          <select class="form-select" id="target-account-select"><option value="">Yukleniyor...</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Hedef Kullanici Adi</label>
+          <input class="form-input" id="new-target" placeholder="@kullaniciadi">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="addTarget()">Hedef Ekle</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Kayitli Hedef Hesaplar</div>
+      <div id="targets-list" class="target-list">
+        <div style="color:#888;padding:20px;text-align:center;">Hesap secin...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VERITABANI -->
+  <div id="tab6" class="tab-content">
     <div class="two-col">
       <div class="card">
         <div class="card-title">Veritabani Istatistikleri</div>
@@ -399,12 +447,12 @@ nusaybingunduzemlak</textarea>
             <div class="stat-label">Toplam</div>
           </div>
           <div class="stat-card stat-approved">
-            <div class="stat-icon">✅</div>
+            <div class="stat-icon">OK</div>
             <div class="stat-value" id="db-approved">0</div>
             <div class="stat-label">Onayli</div>
           </div>
           <div class="stat-card stat-rejected">
-            <div class="stat-icon">❌</div>
+            <div class="stat-icon">NO</div>
             <div class="stat-value" id="db-rejected">0</div>
             <div class="stat-label">Onaysiz</div>
           </div>
@@ -413,15 +461,18 @@ nusaybingunduzemlak</textarea>
       <div class="card">
         <div class="card-title">Veritabani Islemleri</div>
         <div class="btn-row">
-          <button class="btn btn-warning" id="btn-reset-failed">Basarisizlari Tekrar Dene</button>
+          <button class="btn btn-warning" id="btn-reset-failed">Izni Olanlari Tekrar Dene</button>
           <button class="btn btn-secondary" id="btn-clear-history">Gecmisi Temizle</button>
         </div>
+        <p style="font-size:0.8rem;color:#888;margin-top:10px;">
+          "Tekrar Dene" sadece daha once basarisiz olup tekrar deneme izni verilenleri siraya alir.
+        </p>
       </div>
     </div>
     <div class="card">
       <div class="card-title">Son 25 Takip Islemi</div>
       <div class="history-grid" id="history-grid">
-        <div style="color:#888;font-size:0.85rem;padding:20px;text-align:center;">Henuez takip islemi yok...</div>
+        <div style="color:#888;font-size:0.85rem;padding:20px;text-align:center;">Henuz takip islemi yok...</div>
       </div>
     </div>
     <div class="card">
@@ -433,7 +484,7 @@ nusaybingunduzemlak</textarea>
   </div>
 
   <!-- HESAPLAR -->
-  <div id="tab6" class="tab-content">
+  <div id="tab7" class="tab-content">
     <div class="card">
       <div class="card-title">Yeni Hesap Ekle</div>
       <div class="form-grid">
@@ -464,12 +515,12 @@ nusaybingunduzemlak</textarea>
 
   <div class="stats-grid">
     <div class="stat-card stat-success">
-      <div class="stat-icon">✅</div>
+      <div class="stat-icon">OK</div>
       <div class="stat-value" id="stat-approved">0</div>
       <div class="stat-label">Onayli</div>
     </div>
     <div class="stat-card stat-fail">
-      <div class="stat-icon">❌</div>
+      <div class="stat-icon">NO</div>
       <div class="stat-value" id="stat-rejected">0</div>
       <div class="stat-label">Onaysiz</div>
     </div>
