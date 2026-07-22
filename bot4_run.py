@@ -26,8 +26,8 @@ try:
     bot.setup_driver(profile_dir=PROFILE_DIR)
     if bot.login():
         bot.follow_loop(
-            batch_size=50,
-            delay=5,
+            batch_size=100,
+            delay=2,
             break_after=400,
             break_duration=100,
             bot_id=4,

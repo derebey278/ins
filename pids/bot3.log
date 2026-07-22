@@ -1,14 +1,7 @@
-2026-07-20 00:04:52,988 - INFO - Chromium bulundu: /data/data/com.termux/files/usr/bin/chromium-browser
-2026-07-20 00:04:52,989 - INFO - ChromeDriver bulundu: /data/data/com.termux/files/usr/bin/chromedriver
-2026-07-20 00:04:54,806 - INFO - Driver baslatildi (Termux/Android)
-2026-07-20 00:04:54,807 - INFO - Instagram login sayfasi yukleniyor...
-2026-07-20 11:37:06,327 - INFO - Chrome profili: chrome_profiles/bot_3
-2026-07-20 11:37:06,329 - INFO - Chromium bulundu: /data/data/com.termux/files/usr/bin/chromium-browser
-2026-07-20 11:37:06,331 - INFO - ChromeDriver bulundu: /data/data/com.termux/files/usr/bin/chromedriver
-2026-07-20 11:37:07,153 - ERROR - Service ile baslatilamadi: Message: session not created: Chrome instance exited. Examine ChromeDriver verbose log to determine the cause.; For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#sessionnotcreatedexception
-
-2026-07-20 11:37:07,154 - INFO - Profilsiz deneniyor...
-2026-07-20 11:37:07,155 - ERROR - Profilsiz de baslatilamadi: Message: Unable to obtain driver for chrome; For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors/driver_location
-
-2026-07-20 11:37:07,155 - ERROR - Beklenmeyen hata: Message: Unable to obtain driver for chrome; For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors/driver_location
-
+Traceback (most recent call last):
+  File "/storage/emulated/0/Download/instagram_bot/bot3_run.py", line 1, in <module>
+    from bot_engine import InstagramBot
+  File "/storage/emulated/0/Download/instagram_bot/bot_engine.py", line 307
+    cookie_js = "var buttons = document.querySelectorAll('button, div[role=\'button\']');for (var i=0; i<buttons.length; i++) {var text = (buttons[i].innerText || "").toLowerCase();if (text.includes("allow") || text.includes("accept") || text.includes("tum cerezleri") || text.includes("kabul et") || text.includes("agree") || text.includes("onayla")) {buttons[i].click(); return "dismissed-cookie";}} return "no-cookie";"
+                                                                                                                                                                                                        ^^^^^
+SyntaxError: invalid syntax
